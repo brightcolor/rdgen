@@ -14,6 +14,21 @@ on:
         default: ''
         type: string
 
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to build'
+        required: true
+        type: string
+      zip_url:
+        description: 'Ignored in standalone mode'
+        required: false
+        type: string
+        default: '{"url":"none","file":"none"}'
+
+permissions:
+  contents: write
+
 env:
   SCITER_RUST_VERSION: "1.75" # https://github.com/rustdesk/rustdesk/discussions/7503, also 1.78 has ABI change which causes our sciter version not working, https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
   RUST_VERSION: "1.75" # sciter failed on m1 with 1.78 because of https://blog.rust-lang.org/2024/03/30/i128-layout-update.html
@@ -43,6 +58,7 @@ env:
 jobs:
   setup:
     uses: ./.github/workflows/fetch-encrypted-secrets.yml
+    secrets: inherit
     with:
       zip_url_json: ${{ inputs.zip_url }}
 
@@ -567,6 +583,18 @@ jobs:
         if:  matrix.job.arch == 'x86_64' && env.UPLOAD_ARTIFACT == 'true' && env.VERSION != 'master'
         run: |
           cp ./res/rustdesk-${{ env.VERSION }}-0-x86_64.pkg.tar.zst ./output/${{ env.filename }}-${{ matrix.job.arch }}.pkg.tar.zst
+
+      - name: Artifacts fuer GitHub Release hochladen (Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-client-${{ env.VERSION }}-${{ matrix.job.arch }}
+          path: |
+            ./output/${{ env.filename }}-${{ matrix.job.arch }}.deb
+            ./output/${{ env.filename }}-${{ matrix.job.arch }}.rpm
+            ./output/${{ env.filename }}-suse-${{ matrix.job.arch }}.rpm
+            ./output/${{ env.filename }}-${{ matrix.job.arch }}.pkg.tar.zst
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: send file to rdgen server
         if: ${{ env.rdgen == 'true' }}

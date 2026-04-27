@@ -1,0 +1,180 @@
+name: RustDesk Update-Check und Build
+
+# Prueft taeglich auf neue RustDesk-Versionen und baut bei Bedarf
+# automatisch einen angepassten Client fuer Windows und Linux.
+# Nach dem Build wird ein GitHub Release erstellt.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # taeglich 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'RustDesk-Version (leer = automatisch ermitteln)'
+        required: false
+        type: string
+        default: ''
+      force_build:
+        description: 'Build erzwingen, auch wenn Version bereits vorhanden'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # 1. Versionscheck
+  # ─────────────────────────────────────────────────────────────────
+  check-version:
+    name: Versionscheck
+    runs-on: ubuntu-latest
+    outputs:
+      version:      ${{ steps.decide.outputs.version }}
+      should_build: ${{ steps.decide.outputs.should_build }}
+
+    steps:
+      - name: Neueste RustDesk-Version ermitteln
+        id: rustdesk
+        run: |
+          VERSION=$(curl -sf \
+            https://api.github.com/repos/rustdesk/rustdesk/releases/latest \
+            | jq -r '.tag_name')
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "Fehler: Konnte RustDesk-Version nicht abrufen" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Neueste RustDesk-Version: $VERSION"
+
+      - name: Eigene neueste Release-Version ermitteln
+        id: ours
+        run: |
+          OUR=$(curl -sf \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | jq -r '.tag_name // "none"' 2>/dev/null || echo "none")
+          echo "version=$OUR" >> "$GITHUB_OUTPUT"
+          echo "Eigene Release-Version: $OUR"
+
+      - name: Build-Entscheidung treffen
+        id: decide
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            TARGET="${{ inputs.version }}"
+          else
+            TARGET="${{ steps.rustdesk.outputs.version }}"
+          fi
+
+          OUR="${{ steps.ours.outputs.version }}"
+          FORCE="${{ inputs.force_build }}"
+
+          echo "Zielversion   : $TARGET"
+          echo "Eigene Version: $OUR"
+          echo "Force-Build   : $FORCE"
+
+          if [ "$TARGET" = "$OUR" ] && [ "$FORCE" != "true" ]; then
+            echo "Version $TARGET ist bereits aktuell – kein Build noetig."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Neuer Build wird gestartet fuer Version: $TARGET"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$TARGET" >> "$GITHUB_OUTPUT"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2a. Windows-Build (ruft generator-windows.yml als reusable workflow)
+  # ─────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Windows-Build
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    uses: ./.github/workflows/generator-windows.yml
+    with:
+      version: ${{ needs.check-version.outputs.version }}
+      zip_url: '{"url":"none","file":"none"}'
+    secrets: inherit
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2b. Linux-Build (ruft generator-linux.yml als reusable workflow)
+  # ─────────────────────────────────────────────────────────────────
+  build-linux:
+    name: Linux-Build
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    uses: ./.github/workflows/generator-linux.yml
+    with:
+      version: ${{ needs.check-version.outputs.version }}
+      zip_url: '{"url":"none","file":"none"}'
+    secrets: inherit
+
+  # ─────────────────────────────────────────────────────────────────
+  # 3. GitHub Release erstellen (laeuft wenn mindestens 1 Build OK)
+  # ─────────────────────────────────────────────────────────────────
+  publish-release:
+    name: GitHub Release veroeffentlichen
+    needs: [check-version, build-windows, build-linux]
+    if: |
+      always() &&
+      needs.check-version.outputs.should_build == 'true' &&
+      (needs.build-windows.result == 'success' || needs.build-linux.result == 'success')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Alle Build-Artifacts herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts/
+          merge-multiple: true
+
+      - name: Release-Dateien einsammeln und anzeigen
+        id: collect
+        run: |
+          mkdir -p release-files/
+          find all-artifacts/ -type f \( \
+            -name "*.exe" -o -name "*.msi" -o \
+            -name "*.deb" -o -name "*.rpm" -o \
+            -name "*.zst" -o -name "*.AppImage" \
+          \) -exec cp {} release-files/ \;
+
+          echo "Dateien fuer den Release:"
+          ls -lh release-files/ || echo "(keine Dateien gefunden)"
+          COUNT=$(ls release-files/ 2>/dev/null | wc -l)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release erstellen oder aktualisieren
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ needs.check-version.outputs.version }}"
+          name: "RustDesk Custom Client ${{ needs.check-version.outputs.version }}"
+          body: |
+            ## RustDesk Custom Client ${{ needs.check-version.outputs.version }}
+
+            Automatisch erstellter Custom-Client basierend auf RustDesk ${{ needs.check-version.outputs.version }}.
+
+            **Server:** Vorkonfiguriert (im Client eingebettet, nicht oeffentlich sichtbar)
+            **Authentifizierung:** Passwort-gesichert
+
+            ### Installation
+
+            | Plattform | Datei | Beschreibung |
+            |-----------|-------|--------------|
+            | Windows   | `.exe` | Installer (empfohlen) |
+            | Windows   | `.msi` | MSI-Paket (fuer Gruppenrichtlinien) |
+            | Linux (Debian/Ubuntu) | `.deb` | APT-Paket |
+            | Linux (Fedora/RHEL) | `.rpm` | RPM-Paket |
+
+            > Dieser Client ist fuer den internen Einsatz konfiguriert.
+
+            ---
+            *Automatisch erstellt durch [bc-rustdesk](https://github.com/${{ github.repository }})*
+          fail_on_unmatched_files: false
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Zusammenfassung
+        run: |
+          echo "Release veroeffentlicht:"
+          echo "  https://github.com/${{ github.repository }}/releases/tag/${{ needs.check-version.outputs.version }}"

@@ -1,0 +1,66 @@
+# ================================================================
+# RustDesk Custom Client – Konfiguration
+# ================================================================
+# Diese Datei steuert das Aussehen und Verhalten des Custom-Clients.
+#
+# WICHTIG: Server-Adresse, Passwort und Schlüssel stehen NICHT
+# hier, sondern als GitHub Secrets (sicher und nicht öffentlich):
+#   → RUSTDESK_SERVER   (z.B. testserver.de)
+#   → RUSTDESK_PASSWORD (z.B. pass123)
+#   → RUSTDESK_KEY      (öffentlicher Schlüssel des Servers)
+# ================================================================
+
+app:
+  # Name der Anwendung (erscheint im Installer, Titelleiste, Taskleiste)
+  name: RemoteSupport
+
+  # Design: system | dark | light
+  theme: system
+
+  # Dunkles Design auf Wunsch des Nutzers erlauben (Windows)
+  allow_dark_theme: true
+
+
+verbindung:
+  # Verbindungstyp:
+  #   Both     → Client kann sich verbinden UND verbunden werden
+  #   Incoming → Nur eingehende Verbindungen (reines Remote-Ziel)
+  #   Outgoing → Nur ausgehende Verbindungen (reiner Viewer)
+  conn_type: Both
+
+  # Direkte Verbindung (ohne Relay) versuchen
+  direct_server: false
+
+  # Automatisch trennen wenn inaktiv (Minuten, 0 = deaktiviert)
+  auto_disconnect: false
+
+  # LAN-Erkennung aktivieren (Geräte im lokalen Netz anzeigen)
+  lan_discovery: true
+
+
+sicherheit:
+  # Authentifizierungsmethode:
+  #   use-permanent-password → Nur das hinterlegte Passwort
+  #   use-both-passwords     → Festes Passwort + temporäres Einmal-Passwort
+  verification_method: use-permanent-password
+
+  # Zugriffsmodus für eingehende Verbindungen:
+  #   full   → Voller Zugriff (Maus, Tastatur, Dateien, ...)
+  #   view   → Nur schauen, keine Eingaben
+  #   custom → Individuell – siehe Abschnitt "funktionen" unten
+  access_mode: full
+
+
+funktionen:
+  # Welche Funktionen im Client verfügbar sind:
+  # (bei access_mode: custom werden diese einzeln erzwungen)
+  keyboard:       true   # Tastatureingaben übertragen
+  clipboard:      true   # Zwischenablage synchronisieren
+  file_transfer:  true   # Dateiübertragung erlauben
+  audio:          true   # Audio übertragen
+  tunnel:         true   # Port-Tunnel erlauben
+  remote_restart: true   # Fernsteuerung kann PC neu starten
+  record_session: true   # Sitzungsaufzeichnung erlauben
+  block_input:    true   # Eingaben des Nutzers am Ziel-PC sperren
+  camera:         false  # Kamerazugriff (experimentell)
+  terminal:       false  # Terminal-Zugriff (experimentell)
