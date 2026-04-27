@@ -101,8 +101,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────
   build-linux:
     name: Linux-Build
-    needs: check-version
-    if: needs.check-version.outputs.should_build == 'true'
+    # Laeuft NACH Windows, damit encrypted-secrets-zip nicht im gleichen
+    # Artifact-Namespace kollidiert und von Windows-Cleanup geloescht wird
+    needs: [check-version, build-windows]
+    if: always() && needs.check-version.outputs.should_build == 'true'
     uses: ./.github/workflows/generator-linux.yml
     with:
       version: ${{ needs.check-version.outputs.version }}
